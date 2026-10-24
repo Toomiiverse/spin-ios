@@ -1,0 +1,51 @@
+# XcodeGen spec. `xcodegen generate` turns this into Spin.xcodeproj (not checked in).
+# Same arrangement as haru-ios: this file is the source of truth.
+name: Spin
+options:
+  bundleIdPrefix: com.toomiiverse
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "27.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    TARGETED_DEVICE_FAMILY: "1"
+    SWIFT_STRICT_CONCURRENCY: minimal
+targets:
+  Spin:
+    type: application
+    platform: iOS
+    sources:
+      - path: Spin/Sources
+      - path: Spin/Assets.xcassets
+    info:
+      path: Spin/Info.plist
+      properties:
+        CFBundleDisplayName: Spin
+        CFBundleName: Spin
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIRequiresFullScreen: true
+        UIUserInterfaceStyle: Dark
+        ITSAppUsesNonExemptEncryption: false
+        # Keeps playing with the screen off; the lock screen shows the track (Player.swift).
+        UIBackgroundModes:
+          - audio
+    settings:
+      base:
+        # If App Store Connect registers a different identifier (Haru's got a Team ID suffix), put that here.
+        PRODUCT_BUNDLE_IDENTIFIER: com.toomiiverse.spin
+        PRODUCT_NAME: Spin
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: "$(DEVELOPMENT_TEAM)"
+        GENERATE_INFOPLIST_FILE: "NO"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        SUPPORTS_MACCATALYST: "NO"

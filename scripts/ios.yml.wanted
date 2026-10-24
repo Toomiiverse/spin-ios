@@ -1,0 +1,31 @@
+# Goes to .github/workflows/ios.yml. The server's gh token lacks the `workflow` scope, so either
+#   gh auth refresh -h github.com -s workflow   (then commit the file normally)
+# or paste it in on github.com. Same shape as haru-ios.
+name: iOS
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      upload_to_testflight:
+        description: Sign and upload to TestFlight
+        type: boolean
+        default: false
+jobs:
+  build:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (signed and uploaded to TestFlight when the secrets are set; unsigned otherwise)
+        env:
+          ASC_KEY_ID: ${{ (github.event_name == 'push' || inputs.upload_to_testflight) && secrets.ASC_KEY_ID || '' }}
+          ASC_ISSUER_ID: ${{ (github.event_name == 'push' || inputs.upload_to_testflight) && secrets.ASC_ISSUER_ID || '' }}
+          ASC_KEY_P8: ${{ (github.event_name == 'push' || inputs.upload_to_testflight) && secrets.ASC_KEY_P8 || '' }}
+          APPLE_TEAM_ID: ${{ (github.event_name == 'push' || inputs.upload_to_testflight) && secrets.APPLE_TEAM_ID || '' }}
+        run: bash scripts/build-ipa.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Spin-unsigned-ipa
+          path: Spin-unsigned.ipa
+          if-no-files-found: ignore
