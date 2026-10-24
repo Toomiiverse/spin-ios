@@ -23,6 +23,11 @@ playlist, or paste a link. The library is one song list, newest first.
 - Search and SoundCloud → `~/spin-sources/server.py` (user service `spin-sources`, 127.0.0.1:8011):
   [ytmusicapi](https://github.com/sigma67/ytmusicapi) and SoundCloud search, [scdl](https://github.com/scdl-org/scdl)
   downloads, filed as `<Artist>/<Album>/` (a single becomes its own album).
+- Long-press or swipe a song to **edit** its title, artist, album or cover (from Photos), or **delete** it. The
+  server rewrites the file's own tags and art (mutagen) or deletes the file, then rescans the Music library;
+  only a Jellyfin administrator's sign-in is accepted. Pull down on the list to rescan.
+- Search results already in the library are marked, and downloading one again asks first; the server refuses a
+  SoundCloud single that is already on disk unless told to go ahead. yubal skips songs whose file exists.
 - The phone reaches both at `https://haruserver.tail6da04d.ts.net:8930` (yubal) and `…:8930/sources`
   (`tailscale serve`, tailnet only; neither has a login).
 

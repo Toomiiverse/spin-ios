@@ -66,6 +66,16 @@ import Foundation
         assert(mixed.first == 7 && mixed.sorted() == Array(0..<50), "shuffle keeps every song and the playing one first")
         assert(shuffledKeeping([Int](), first: 0).isEmpty && shuffledKeeping([1], first: 5) == [1])
         assert(letter("derezzed") == "D" && letter("Été") == "E" && letter("2 Fast") == "#" && letter("") == "#" && letter("春") == "#")
+        let library: [Track] = try Jellyfin.decode(Data(#"{"Items":[{"Name":"Derezzed (From \"TRON: Legacy\"/Score)","Id":"s1","Artists":["Daft Punk"],"AlbumId":"a1","AlbumPrimaryImageTag":"t9","ImageTags":{"Primary":"own"}}]}"#.utf8))
+        assert(library[0].artTag == "t9" && bare[0].artTag == nil, "the album's picture tag when the song has an album")
+        assert(jf.artwork(for: library[0])!.absoluteString.hasSuffix("/Items/a1/Images/Primary?fillWidth=600&fillHeight=600&quality=90&tag=t9"))
+        let hit = Sources.Result(kind: "song", title: "Derezzed (From \"TRON: Legacy\"/Score)", artist: "Daft Punk, Someone", detail: "", duration: "", thumbnail: nil, url: "u")
+        let album = Sources.Result(kind: "album", title: "Derezzed (From \"TRON: Legacy\"/Score)", artist: "Daft Punk", detail: "", duration: "", thumbnail: nil, url: "v")
+        let other = Sources.Result(kind: "song", title: "Derezzed", artist: "Daft Punk", detail: "", duration: "", thumbnail: nil, url: "w")
+        assert(Sources.inLibrary(hit, library) && !Sources.inLibrary(album, library) && !Sources.inLibrary(other, library))
+        assert(Sources.plain("Hello, World! 2") == "helloworld2")
+        assert(YubalError(code: 409, body: Data(#"{"detail":"Already in your library: X","duplicate":true}"#.utf8)).duplicate)
+        assert(!YubalError(code: 409, body: Data(#"{"detail":"Queue is full"}"#.utf8)).duplicate)
         print("transport ok")
     }
 }

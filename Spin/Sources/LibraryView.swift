@@ -9,6 +9,8 @@ struct LibraryView: View {
     @State private var error: String?
     @State private var showPlayer = false
     @State private var showAdd = false
+    @State private var editing: Track?
+    @State private var deleting: Track?
 
     private var shown: [Track] {
         let q = filter.trimmingCharacters(in: .whitespaces)
@@ -27,6 +29,14 @@ struct LibraryView: View {
                             showPlayer = true
                         } label: {
                             SongRow(track: track, current: player.current?.id == track.id)
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button("Delete", systemImage: "trash") { deleting = track }.tint(.red)
+                            Button("Edit", systemImage: "pencil") { editing = track }.tint(Ink.pink)
+                        }
+                        .contextMenu {
+                            Button("Edit details and cover", systemImage: "pencil") { editing = track }
+                            Button("Delete from library", systemImage: "trash", role: .destructive) { deleting = track }
                         }
                     }
                 } header: {
@@ -58,9 +68,25 @@ struct LibraryView: View {
             }
             .fullScreenCover(isPresented: $showPlayer) { PlayerView() }
             // New downloads reach Jellyfin a minute or so after they finish; reload on the way back and on pull.
-            .sheet(isPresented: $showAdd, onDismiss: { Task { await load() } }) { AddView() }
+            .sheet(isPresented: $showAdd, onDismiss: { Task { await load() } }) {
+                AddView(library: songs) { await load() }.environmentObject(session)
+            }
+            .sheet(item: $editing) { track in
+                EditSongView(track: track) { await load() }.environmentObject(session)
+            }
+            .confirmationDialog("Delete \(deleting?.name ?? "this song")?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                                titleVisibility: .visible, presenting: deleting) { track in
+                Button("Delete the file", role: .destructive) { Task { await delete(track) } }
+            } message: { _ in
+                Text("It is removed from the server for good. You can download it again later.")
+            }
             .task { await load() }
-            .refreshable { await load() }
+            // A pull rescans the server first, so anything added outside the app shows up too.
+            .refreshable {
+                if let client = session.client { try? await Sources().refreshLibrary(client) }
+                try? await Task.sleep(for: .seconds(2))
+                await load()
+            }
         }
         .tint(Ink.pink)
     }
@@ -78,6 +104,18 @@ struct LibraryView: View {
             Hazard().frame(height: 8).padding(.top, 4)
         }
         .padding(.vertical, 8)
+    }
+
+    private func delete(_ track: Track) async {
+        guard let client = session.client else { return }
+        do {
+            try await Sources().delete(track, via: client)
+            songs.removeAll { $0.id == track.id }
+            if player.current?.id == track.id { player.queue.count > 1 ? player.next() : player.pause() }
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     private func load() async {
@@ -98,7 +136,7 @@ struct SongRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Cover(url: session.client?.artwork(track.artId, size: 160), size: 48)
+            Cover(url: session.client?.artwork(for: track, size: 160), size: 48)
             VStack(alignment: .leading, spacing: 3) {
                 Text(track.name).font(.system(size: 16, weight: .heavy)).foregroundStyle(current ? Ink.pink : Color.white).lineLimit(1)
                 Text(track.artist).font(.footnote.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
@@ -118,7 +156,7 @@ struct MiniBar: View {
     var body: some View {
         if let track = player.current {
             HStack(spacing: 12) {
-                Disc(art: session.client?.artwork(track.artId, size: 200), spinning: player.playing, size: 44)
+                Disc(art: session.client?.artwork(for: track, size: 200), spinning: player.playing, size: 44)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(track.name).caps(15).foregroundStyle(.white).lineLimit(1)
                     Text(track.artist).font(.caption.weight(.semibold)).foregroundStyle(Ink.pink).lineLimit(1)

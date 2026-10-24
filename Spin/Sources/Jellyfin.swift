@@ -8,10 +8,14 @@ struct Track: Identifiable, Decodable, Hashable {
     let albumId: String?
     let artists: [String]?
     let runTimeTicks: Int64?
+    let imageTags: [String: String]?
+    let albumPrimaryImageTag: String?
 
     var artist: String { (artists ?? []).joined(separator: ", ") }
     /// Whose picture to show: the album's when there is one, else the song's own embedded art.
     var artId: String { albumId ?? id }
+    /// Changes when the picture does, so a new cover replaces the cached one.
+    var artTag: String? { albumId != nil ? albumPrimaryImageTag : imageTags?["Primary"] }
     var seconds: Double { Double(runTimeTicks ?? 0) / 10_000_000 }
 }
 
@@ -70,9 +74,11 @@ struct Jellyfin {
     }
 
     /// Album art, square. Jellyfin answers 404 for an album without one; the views show a blank disc then.
-    func artwork(_ itemId: String, size: Int = 600) -> URL? {
-        URL(string: "\(server)/Items/\(itemId)/Images/Primary?fillWidth=\(size)&fillHeight=\(size)&quality=90")
+    func artwork(_ itemId: String, size: Int = 600, tag: String? = nil) -> URL? {
+        URL(string: "\(server)/Items/\(itemId)/Images/Primary?fillWidth=\(size)&fillHeight=\(size)&quality=90" + (tag.map { "&tag=\($0)" } ?? ""))
     }
+
+    func artwork(for track: Track, size: Int = 600) -> URL? { artwork(track.artId, size: size, tag: track.artTag) }
 
     /// Direct play when the phone can decode the file, else Jellyfin transcodes to AAC over HLS.
     /// The token travels in the query because AVPlayer sends no headers of ours.

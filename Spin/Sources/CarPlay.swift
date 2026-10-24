@@ -220,8 +220,8 @@ import UIKit
 
     /// Cover art sized for a list row, fetched once per picture.
     private func image(for track: Track, then set: @escaping (UIImage) -> Void) {
-        guard let url = session.client?.artwork(track.artId, size: 240) else { return }
-        let key = track.artId
+        guard let url = session.client?.artwork(for: track, size: 240) else { return }
+        let key = track.artId  // shortcut: a cover changed on the phone shows in the car after reconnecting
         Task {
             if let cached = art[key] { set(cached); return }
             guard let data = try? await URLSession.shared.data(from: url).0, let image = UIImage(data: data) else { return }

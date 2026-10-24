@@ -8,7 +8,7 @@ struct PlayerView: View {
     @State private var scrubbing: Double?
 
     private var track: Track? { player.current }
-    private var art: URL? { track.flatMap { session.client?.artwork($0.artId) } }
+    private var art: URL? { track.flatMap { session.client?.artwork(for: $0) } }
 
     var body: some View {
         ZStack {

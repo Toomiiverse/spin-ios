@@ -3,6 +3,11 @@ import SwiftUI
 /// Search YouTube Music or SoundCloud, or paste a link; the server downloads it into the library.
 /// YouTube Music goes to yubal, SoundCloud to scdl; both queues show together below.
 struct AddView: View {
+    /// The songs already in the library, to warn before downloading one again.
+    let library: [Track]
+    /// Called after a finished download has been rescanned into the library.
+    let changed: () async -> Void
+    @EnvironmentObject private var session: Session
     @Environment(\.dismiss) private var dismiss
     @State private var source = Sources.Source.youtube
     @State private var query = ""
@@ -12,6 +17,10 @@ struct AddView: View {
     @State private var jobs: [Yubal.Job] = []
     @State private var error: String?
     @State private var searching = false
+    /// A link waiting on "Download again?" because the song is already in the library.
+    @State private var again: String?
+    /// Downloads already seen finished, so each one triggers a single rescan.
+    @State private var done: Set<String>?
     private let yubal = Yubal()
     private let sources = Sources()
 
@@ -39,7 +48,9 @@ struct AddView: View {
                         .padding(12).background(Ink.panel, in: Slant())
                     if searching { ProgressView().tint(Ink.pink).frame(maxWidth: .infinity) }
                     ForEach(results) { result in
-                        ResultRow(result: result, added: added.contains(result.url)) { Task { await add(result.url) } }
+                        ResultRow(result: result, added: added.contains(result.url), owned: Sources.inLibrary(result, library)) {
+                            if Sources.inLibrary(result, library) { again = result.url } else { Task { await add(result.url) } }
+                        }
                     }
                     Text("Or paste a YouTube Music or SoundCloud link").caps(12).foregroundStyle(Ink.pink).padding(.top, 6)
                     HStack(spacing: 8) {
@@ -56,12 +67,25 @@ struct AddView: View {
                     }
                     if let error { Text(error).font(.footnote.weight(.semibold)).foregroundStyle(Ink.pink) }
                     if !jobs.isEmpty {
-                        Text("Downloads").caps(12).foregroundStyle(.white.opacity(0.6)).padding(.top, 6)
+                        HStack {
+                            Text("Downloads").caps(12).foregroundStyle(.white.opacity(0.6))
+                            Spacer()
+                            if jobs.contains(where: \.finished) {
+                                Button("Clear finished") { Task { await clear() } }.caps(12).foregroundStyle(Ink.pink)
+                            }
+                        }
+                        .padding(.top, 6)
                         ForEach(jobs) { JobRow(job: $0) }
                     }
                 }
                 .padding(16)
             }
+        }
+        .confirmationDialog("Already in your library", isPresented: Binding(get: { again != nil }, set: { if !$0 { again = nil } }),
+                            titleVisibility: .visible, presenting: again) { url in
+            Button("Download again") { Task { await add(url, force: true) } }
+        } message: { _ in
+            Text("A song with this title and artist is already there.")
         }
         .task {
             if let clip = UIPasteboard.general.string, Yubal.isLink(clip) || Sources.isSoundCloud(clip) { link = clip }
@@ -85,19 +109,29 @@ struct AddView: View {
         }
     }
 
-    /// SoundCloud links go to scdl, everything else to yubal.
+    /// SoundCloud links go to scdl, everything else to yubal (which skips songs whose file already exists).
     @discardableResult
-    private func add(_ url: String) async -> Bool {
+    private func add(_ url: String, force: Bool = false) async -> Bool {
         do {
-            if Sources.isSoundCloud(url) { try await sources.add(url) } else { try await yubal.add(url) }
+            if Sources.isSoundCloud(url) { try await sources.add(url, force: force) } else { try await yubal.add(url) }
             added.insert(url)
             error = nil
             await refresh()
             return true
+        } catch let refused as YubalError where refused.duplicate {
+            again = url
+            return false
         } catch {
             self.error = error.localizedDescription
             return false
         }
+    }
+
+    private func clear() async {
+        try? await yubal.clear()
+        try? await sources.clearSoundCloud()
+        done = nil
+        await refresh()
     }
 
     private func refresh() async {
@@ -107,12 +141,21 @@ struct AddView: View {
         let (yt, sc) = await (fromYouTube, fromSoundCloud)
         if yt == nil && sc == nil { error = error ?? "The downloaders are not reachable. Is Tailscale on?" }
         jobs = ((yt ?? []) + (sc ?? [])).sorted { !$0.finished && $1.finished }
+        // A download that just finished: rescan now rather than waiting on Jellyfin's own watcher.
+        let finished = Set(jobs.filter { $0.status == "completed" }.map(\.id))
+        if let seen = done, !finished.subtracting(seen).isEmpty, let client = session.client {
+            try? await sources.refreshLibrary(client)
+            try? await Task.sleep(for: .seconds(3))
+            await changed()
+        }
+        done = finished
     }
 }
 
 struct ResultRow: View {
     let result: Sources.Result
     let added: Bool
+    let owned: Bool
     let action: () -> Void
 
     var body: some View {
@@ -122,7 +165,9 @@ struct ResultRow: View {
                 Text(result.title).font(.system(size: 15, weight: .heavy)).foregroundStyle(.white).lineLimit(1)
                 Text([result.artist, result.detail, result.duration].filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
-                if result.kind == "album" || result.kind == "playlist" {
+                if owned {
+                    Text("In your library").caps(10).foregroundStyle(Ink.neonGreen)
+                } else if result.kind == "album" || result.kind == "playlist" {
                     Text(result.kind).caps(10).foregroundStyle(Ink.pink)
                 }
             }
