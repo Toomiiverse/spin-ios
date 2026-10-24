@@ -1,13 +1,6 @@
 import Foundation
 import Combine
 
-struct Album: Identifiable, Decodable, Hashable {
-    let id: String
-    let name: String
-    let albumArtist: String?
-    let productionYear: Int?
-}
-
 struct Track: Identifiable, Decodable, Hashable {
     let id: String
     let name: String
@@ -17,6 +10,8 @@ struct Track: Identifiable, Decodable, Hashable {
     let runTimeTicks: Int64?
 
     var artist: String { (artists ?? []).joined(separator: ", ") }
+    /// Whose picture to show: the album's when there is one, else the song's own embedded art.
+    var artId: String { albumId ?? id }
     var seconds: Double { Double(runTimeTicks ?? 0) / 10_000_000 }
 }
 
@@ -68,12 +63,10 @@ struct Jellyfin {
         return Jellyfin(server: server, token: auth.accessToken, userId: auth.user.id)
     }
 
-    func albums() async throws -> [Album] {
-        try await items("includeItemTypes=MusicAlbum&recursive=true&sortBy=AlbumArtist,SortName&sortOrder=Ascending")
-    }
-
-    func tracks(of album: Album) async throws -> [Track] {
-        try await items("parentId=\(album.id)&includeItemTypes=Audio&sortBy=ParentIndexNumber,IndexNumber,SortName&sortOrder=Ascending")
+    /// Every song, newest first, so whatever was just added sits on top.
+    /// shortcut: one request for the whole library, fine for a personal collection; page it past a few thousand songs.
+    func songs() async throws -> [Track] {
+        try await items("includeItemTypes=Audio&recursive=true&sortBy=DateCreated,SortName&sortOrder=Descending")
     }
 
     /// Album art, square. Jellyfin answers 404 for an album without one; the views show a blank disc then.

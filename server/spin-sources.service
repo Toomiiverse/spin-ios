@@ -1,0 +1,11 @@
+[Unit]
+Description=Spin search (ytmusicapi) and SoundCloud downloads (scdl), 127.0.0.1:8011
+After=network-online.target
+
+[Service]
+ExecStart=%h/spin-sources/venv/bin/python %h/spin-ios/server/spin-sources.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

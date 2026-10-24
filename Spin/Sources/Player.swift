@@ -95,7 +95,7 @@ import Combine
             MPNowPlayingInfoPropertyElapsedPlaybackTime: 0.0,
             MPNowPlayingInfoPropertyPlaybackRate: 1.0,
         ]
-        guard let albumId = track.albumId, let url = client?.artwork(albumId) else { return }
+        guard let url = client?.artwork(track.artId) else { return }
         Task {
             let data = try? await URLSession.shared.data(from: url).0
             // The disc may have changed while the picture loaded.

@@ -79,3 +79,64 @@ struct YubalError: LocalizedError {
         return code == 0 ? "The downloader is not reachable. Is Tailscale on?" : "The downloader answered \(code)."
     }
 }
+
+/// spin-sources on the home server: YouTube Music and SoundCloud search (ytmusicapi, SoundCloud's API) and
+/// SoundCloud downloads (scdl). Its queue has yubal's job shape. Mounted at /sources beside yubal.
+struct Sources {
+    static let defaultServer = Yubal.defaultServer + "/sources"
+    var server = defaultServer
+
+    enum Source: String, CaseIterable, Identifiable {
+        case youtube, soundcloud
+        var id: String { rawValue }
+        var title: String { self == .youtube ? "YouTube Music" : "SoundCloud" }
+    }
+
+    struct Result: Identifiable, Decodable, Equatable {
+        let kind: String
+        let title: String
+        let artist: String
+        let detail: String
+        let duration: String
+        let thumbnail: String?
+        let url: String
+        var id: String { url }
+    }
+
+    static func isSoundCloud(_ text: String) -> Bool {
+        guard let url = URL(string: text.trimmingCharacters(in: .whitespacesAndNewlines)), url.scheme == "https",
+              let host = url.host?.lowercased() else { return false }
+        return host == "soundcloud.com" || host.hasSuffix(".soundcloud.com")
+    }
+
+    func search(_ query: String, in source: Source) async throws -> [Result] {
+        var parts = URLComponents(string: server + "/search")!
+        parts.queryItems = [URLQueryItem(name: "q", value: query), URLQueryItem(name: "source", value: source.rawValue)]
+        let (data, response) = try await URLSession.shared.data(from: parts.url!)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else { throw YubalError(code: code, body: data) }
+        return try Self.decodeResults(data)
+    }
+
+    func add(_ link: String) async throws {
+        var request = URLRequest(url: URL(string: server + "/soundcloud")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["url": link.trimmingCharacters(in: .whitespacesAndNewlines)])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 201 else { throw YubalError(code: code, body: data) }
+    }
+
+    func jobs() async throws -> [Yubal.Job] {
+        let (data, response) = try await URLSession.shared.data(from: URL(string: server + "/soundcloud")!)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else { throw YubalError(code: code, body: data) }
+        return try Yubal.decode(data)
+    }
+
+    static func decodeResults(_ data: Data) throws -> [Result] {
+        struct Page: Decodable { let results: [Result] }
+        return try JSONDecoder().decode(Page.self, from: data).results
+    }
+}

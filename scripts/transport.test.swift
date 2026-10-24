@@ -26,8 +26,7 @@ import Foundation
                && tracks[0].artist == "Blue Dot Sessions", "Jellyfin's PascalCase decodes into the models")
         let bare: [Track] = try Jellyfin.decode(Data(#"{"Items":[{"Name":"x","Id":"1"}]}"#.utf8))
         assert(bare[0].artist == "" && bare[0].seconds == 0, "a track with no tags still decodes")
-        let albums: [Album] = try Jellyfin.decode(Data(#"{"Items":[{"Name":"Pecan Grove","Id":"al1","AlbumArtist":"Blue Dot Sessions","ProductionYear":2015}]}"#.utf8))
-        assert(albums[0].albumArtist == "Blue Dot Sessions" && albums[0].productionYear == 2015)
+        assert(tracks[0].artId == "al1" && bare[0].artId == "1", "album picture when there is one, else the song's own")
 
         let jf = Jellyfin(server: "https://h.example:8920", token: "tok", userId: "u1")
         let url = jf.stream(tracks[0])!.absoluteString
@@ -48,6 +47,12 @@ import Foundation
         let invalid = YubalError(code: 422, body: Data(#"{"detail":[{"msg":"Value error, Invalid URL."}]}"#.utf8))
         assert(invalid.errorDescription == "Value error, Invalid URL.")
         assert(YubalError(code: 0, body: Data()).errorDescription!.contains("Tailscale"))
+
+        let found = try Sources.decodeResults(Data(#"{"results":[{"kind":"song","title":"T","artist":"A","detail":"Al","duration":"4:40","thumbnail":null,"url":"https://music.youtube.com/watch?v=x"}]}"#.utf8))
+        assert(found.count == 1 && found[0].id == "https://music.youtube.com/watch?v=x" && found[0].thumbnail == nil)
+        assert(Sources.isSoundCloud("https://soundcloud.com/a/b") && Sources.isSoundCloud("https://on.soundcloud.com/x"))
+        assert(!Sources.isSoundCloud("http://soundcloud.com/a") && !Sources.isSoundCloud("https://soundcloud.com.evil.net/a") && !Sources.isSoundCloud("https://music.youtube.com/x"))
+        assert(Sources.defaultServer == "https://haruserver.tail6da04d.ts.net:8930/sources")
         print("transport ok")
     }
 }
