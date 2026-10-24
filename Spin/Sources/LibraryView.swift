@@ -7,6 +7,7 @@ struct LibraryView: View {
     @State private var albums: [Album] = []
     @State private var error: String?
     @State private var showPlayer = false
+    @State private var showAdd = false
 
     var body: some View {
         NavigationStack {
@@ -32,14 +33,20 @@ struct LibraryView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Ink.black, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarLeading) {
                     Button("Sign out") { session.signOut() }.caps(12)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showAdd = true } label: { Image(systemName: "plus").font(.headline) }
+                        .accessibilityLabel("Add music")
                 }
             }
             .safeAreaInset(edge: .bottom) {
                 if player.current != nil { MiniBar().onTapGesture { showPlayer = true } }
             }
             .fullScreenCover(isPresented: $showPlayer) { PlayerView() }
+            // New downloads reach Jellyfin's library a little after yubal finishes; reload on the way back.
+            .sheet(isPresented: $showAdd, onDismiss: { Task { await load() } }) { AddView() }
             .task { await load() }
             .refreshable { await load() }
         }

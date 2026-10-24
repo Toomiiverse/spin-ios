@@ -13,6 +13,14 @@ CD-deck player (black deck, hot pink disc, vertical LCD, hazard stripes). iPhone
 - **The app** signs in with the Jellyfin user (`toomii` + password), lists albums, plays with AVPlayer
   (direct play, or Jellyfin transcodes to AAC/HLS), keeps playing in the background with lock-screen controls.
 
+## Adding music from YouTube Music
+
+The **+** in the library opens Add music: paste a YouTube Music link (song, album or playlist) and
+[yubal](https://github.com/guillevc/yubal) on the server downloads it, tags it and files it as
+`<Artist>/<Year> - <Album>/` in the music folder, where Jellyfin picks it up. yubal runs in the anime-server
+compose stack (`yubal`, 127.0.0.1:8010, m4a) and the phone reaches it at
+`https://haruserver.tail6da04d.ts.net:8930` (`tailscale serve`, tailnet only; yubal has no login).
+
 ## Code
 
 - `Spin/Sources/Jellyfin.swift` — the client (auth, albums, tracks, stream and artwork URLs) and the saved session.

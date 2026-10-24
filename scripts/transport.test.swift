@@ -36,6 +36,18 @@ import Foundation
         assert(Jellyfin.normalize(" haruserver.tail6da04d.ts.net:8920/ ") == "https://haruserver.tail6da04d.ts.net:8920")
         assert(Jellyfin.normalize("http://10.0.0.2:8096") == "http://10.0.0.2:8096")
         assert(Jellyfin.authorization(token: "t").hasSuffix(", Token=\"t\"") && Jellyfin.authorization(token: nil).hasPrefix("MediaBrowser Client=\"Spin\""))
+
+        // yubal's job list, trimmed from its v0.10.0 schema (snake_case, oldest first).
+        let jobsJSON = #"{"jobs":[{"id":"a","url":"https://music.youtube.com/watch?v=x","status":"completed","progress":100.0,"content_info":{"title":"Song","artist":"Band","thumbnail_url":"https://i.ytimg.com/x.jpg","track_count":1,"kind":"track"}},{"id":"b","url":"https://music.youtube.com/playlist?list=y","status":"downloading","progress":42.5,"content_info":null}]}"#
+        let jobs = try Yubal.decode(Data(jobsJSON.utf8))
+        assert(jobs.map(\.id) == ["b", "a"], "newest job first")
+        assert(jobs[1].contentInfo?.thumbnailUrl == "https://i.ytimg.com/x.jpg" && jobs[1].finished && jobs[1].label == "In library")
+        assert(!jobs[0].finished && jobs[0].progress == 42.5 && jobs[0].contentInfo == nil)
+        assert(Yubal.isLink("https://music.youtube.com/watch?v=abc") && Yubal.isLink(" https://youtu.be/abc ") && Yubal.isLink("https://www.youtube.com/playlist?list=x"))
+        assert(!Yubal.isLink("https://evil-youtube.com/x") && !Yubal.isLink("hello") && !Yubal.isLink("https://soundcloud.com/x"))
+        let invalid = YubalError(code: 422, body: Data(#"{"detail":[{"msg":"Value error, Invalid URL."}]}"#.utf8))
+        assert(invalid.errorDescription == "Value error, Invalid URL.")
+        assert(YubalError(code: 0, body: Data()).errorDescription!.contains("Tailscale"))
         print("transport ok")
     }
 }
