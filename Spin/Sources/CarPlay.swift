@@ -2,7 +2,7 @@ import CarPlay
 import Combine
 import UIKit
 
-/// Spin on the car screen, laid out like Spotify's CarPlay app: tabs along the top (Home, Songs, Artists),
+/// Spin on the car screen, laid out like Spotify's CarPlay app: tabs along the top (Home, Playlists, Songs, Artists),
 /// a row of cover art for what was added lately, and the system Now Playing screen with shuffle, repeat
 /// and Up Next. CarPlay only allows Apple's templates, so the ZZZ look stays on the phone; the pink tint carries over.
 @MainActor final class SpinCarPlayScene: NSObject, CPTemplateApplicationSceneDelegate, CPNowPlayingTemplateObserver {
@@ -10,6 +10,7 @@ import UIKit
     private let home = CPListTemplate(title: "Home", sections: [])
     private let songsTab = CPListTemplate(title: "Songs", sections: [])
     private let artistsTab = CPListTemplate(title: "Artists", sections: [])
+    private let playlistsTab = CPListTemplate(title: "Playlists", sections: [])
     private var songs: [Track] = []
     /// Every list row showing a song, so the playing one gets the equaliser marker wherever it appears.
     private var rows: [(id: String, item: CPListItem)] = []
@@ -25,10 +26,11 @@ import UIKit
         home.tabImage = UIImage(systemName: "house.fill")
         songsTab.tabImage = UIImage(systemName: "music.note.list")
         artistsTab.tabImage = UIImage(systemName: "music.mic")
-        for list in [home, songsTab, artistsTab] {
+        playlistsTab.tabImage = UIImage(systemName: "music.note.list")
+        for list in tabs {
             list.emptyViewTitleVariants = ["Loading…"]
         }
-        interfaceController.setRootTemplate(CPTabBarTemplate(templates: [home, songsTab, artistsTab]), animated: false, completion: nil)
+        interfaceController.setRootTemplate(CPTabBarTemplate(templates: tabs), animated: false, completion: nil)
 
         let nowPlaying = CPNowPlayingTemplate.shared
         nowPlaying.isUpNextButtonEnabled = true
@@ -55,32 +57,39 @@ import UIKit
 
     // MARK: Lists
 
+    private var tabs: [CPListTemplate] { [home, playlistsTab, songsTab, artistsTab] }
+
     private func reload() async {
         guard let client = session.client else {
             songs = []
-            for list in [home, songsTab, artistsTab] {
+            for list in tabs {
                 list.emptyViewTitleVariants = ["Sign in on your iPhone"]
                 list.updateSections([])
             }
             return
         }
+        let lists: [Playlist]
         do {
             songs = try await client.songs()
+            lists = try await client.playlists()
         } catch {
-            for list in [home, songsTab, artistsTab] {
+            for list in tabs {
                 list.emptyViewTitleVariants = ["Can't reach your music"]
                 list.emptyViewSubtitleVariants = ["Check Tailscale on your iPhone"]
             }
             return
         }
-        for list in [home, songsTab, artistsTab] {
+        for list in tabs {
             list.emptyViewTitleVariants = ["No songs yet"]
             list.emptyViewSubtitleVariants = ["Add some from the + on your iPhone"]
         }
+        playlistsTab.emptyViewTitleVariants = ["No playlists yet"]
+        playlistsTab.emptyViewSubtitleVariants = ["Make one on your iPhone"]
         rows = []
         home.updateSections(homeSections())
         songsTab.updateSections(alphabetical(songs))
         artistsTab.updateSections(artistSections())
+        playlistsTab.updateSections(playlistSections(lists))
         markPlaying()
     }
 
@@ -142,6 +151,27 @@ import UIKit
                 done()
             }
             if let first = tracks.first { image(for: first) { [weak item] in item?.setImage($0) } }
+            return item
+        }
+        return [CPListSection(items: items)]
+    }
+
+    /// Songs load when a playlist is opened, so edits on the phone show up the next time it is tapped.
+    private func playlistSections(_ lists: [Playlist]) -> [CPListSection] {
+        let items: [CPListItem] = lists.prefix(CPListTemplate.maximumItemCount).map { playlist in
+            let item = CPListItem(text: playlist.name, detailText: songCount(playlist.childCount ?? 0),
+                                  image: UIImage(systemName: "music.note.list"))
+            item.accessoryType = .disclosureIndicator
+            item.handler = { [weak self] _, done in
+                Task { @MainActor in
+                    let tracks = (try? await self?.session.client?.songs(in: playlist)) ?? []
+                    self?.push(title: playlist.name, tracks: tracks, shuffleRow: !tracks.isEmpty)
+                    done()
+                }
+            }
+            if let url = session.client?.artwork(playlist.id, size: 240, tag: playlist.imageTags?["Primary"]) {
+                fetch(url, key: playlist.id) { [weak item] in item?.setImage($0) }
+            }
             return item
         }
         return [CPListSection(items: items)]
@@ -221,7 +251,10 @@ import UIKit
     /// Cover art sized for a list row, fetched once per picture.
     private func image(for track: Track, then set: @escaping (UIImage) -> Void) {
         guard let url = session.client?.artwork(for: track, size: 240) else { return }
-        let key = track.artId  // shortcut: a cover changed on the phone shows in the car after reconnecting
+        fetch(url, key: track.artId, then: set)  // shortcut: a cover changed on the phone shows in the car after reconnecting
+    }
+
+    private func fetch(_ url: URL, key: String, then set: @escaping (UIImage) -> Void) {
         Task {
             if let cached = art[key] { set(cached); return }
             guard let data = try? await URLSession.shared.data(from: url).0, let image = UIImage(data: data) else { return }

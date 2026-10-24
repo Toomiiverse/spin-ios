@@ -10,6 +10,8 @@ struct Track: Identifiable, Decodable, Hashable {
     let runTimeTicks: Int64?
     let imageTags: [String: String]?
     let albumPrimaryImageTag: String?
+    /// Set only on songs read from a playlist: which entry this is, so the same song can sit there twice.
+    var playlistItemId: String? = nil
 
     var artist: String { (artists ?? []).joined(separator: ", ") }
     /// Whose picture to show: the album's when there is one, else the song's own embedded art.
@@ -17,6 +19,22 @@ struct Track: Identifiable, Decodable, Hashable {
     /// Changes when the picture does, so a new cover replaces the cached one.
     var artTag: String? { albumId != nil ? albumPrimaryImageTag : imageTags?["Primary"] }
     var seconds: Double { Double(runTimeTicks ?? 0) / 10_000_000 }
+}
+
+/// The same song picked twice goes in once.
+func unique(_ songs: [Track]) -> [Track] {
+    var seen = Set<String>()
+    return songs.filter { seen.insert($0.id).inserted }
+}
+
+func songCount(_ songs: Int) -> String { songs == 1 ? "1 song" : "\(songs) songs" }
+
+struct Playlist: Identifiable, Decodable, Hashable {
+    let id: String
+    let name: String
+    let childCount: Int?
+    /// Jellyfin draws a collage of the first covers once a playlist has songs.
+    let imageTags: [String: String]?
 }
 
 enum JellyfinError: LocalizedError {
@@ -73,6 +91,32 @@ struct Jellyfin {
         try await items("includeItemTypes=Audio&recursive=true&sortBy=DateCreated,SortName&sortOrder=Descending")
     }
 
+    func playlists() async throws -> [Playlist] {
+        try await items("includeItemTypes=Playlist&recursive=true&sortBy=SortName&fields=ChildCount")
+    }
+
+    func songs(in playlist: Playlist) async throws -> [Track] {
+        try Self.decode(try await send("GET", "/Playlists/\(playlist.id)/Items?userId=\(userId)"))
+    }
+
+    func createPlaylist(_ name: String, songs: [Track]) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["Name": name, "Ids": songs.map(\.id), "UserId": userId, "MediaType": "Audio"])
+        _ = try await send("POST", "/Playlists", body: body)
+    }
+
+    func add(_ songs: [Track], to playlist: Playlist) async throws {
+        _ = try await send("POST", "/Playlists/\(playlist.id)/Items?userId=\(userId)&ids=\(songs.map(\.id).joined(separator: ","))")
+    }
+
+    func remove(_ entries: [Track], from playlist: Playlist) async throws {
+        _ = try await send("DELETE", "/Playlists/\(playlist.id)/Items?entryIds=\(entries.compactMap(\.playlistItemId).joined(separator: ","))")
+    }
+
+    /// Only the playlist goes; its songs stay in the library.
+    func delete(_ playlist: Playlist) async throws {
+        _ = try await send("DELETE", "/Items/\(playlist.id)")
+    }
+
     /// Album art, square. Jellyfin answers 404 for an album without one; the views show a blank disc then.
     func artwork(_ itemId: String, size: Int = 600, tag: String? = nil) -> URL? {
         URL(string: "\(server)/Items/\(itemId)/Images/Primary?fillWidth=\(size)&fillHeight=\(size)&quality=90" + (tag.map { "&tag=\($0)" } ?? ""))
@@ -99,13 +143,20 @@ struct Jellyfin {
     }
 
     private func items<T: Decodable>(_ query: String) async throws -> [T] {
-        guard let url = URL(string: "\(server)/Items?userId=\(userId)&\(query)") else { throw JellyfinError.badServer }
+        try Self.decode(try await send("GET", "/Items?userId=\(userId)&\(query)"))
+    }
+
+    private func send(_ method: String, _ path: String, body: Data? = nil) async throws -> Data {
+        guard let url = URL(string: server + path) else { throw JellyfinError.badServer }
         var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.httpBody = body
+        if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         request.setValue(Self.authorization(token: token), forHTTPHeaderField: "Authorization")
         let (data, response) = try await URLSession.shared.data(for: request)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard code == 200 else { throw JellyfinError.status(code) }
-        return try Self.decode(data)
+        guard (200..<300).contains(code) else { throw JellyfinError.status(code) }
+        return data
     }
 
     /// Jellyfin's "Name" becomes the models' "name", and so on.

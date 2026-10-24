@@ -76,6 +76,13 @@ import Foundation
         assert(Sources.plain("Hello, World! 2") == "helloworld2")
         assert(YubalError(code: 409, body: Data(#"{"detail":"Already in your library: X","duplicate":true}"#.utf8)).duplicate)
         assert(!YubalError(code: 409, body: Data(#"{"detail":"Queue is full"}"#.utf8)).duplicate)
+        // A playlist's songs, trimmed from Jellyfin 10.11's /Playlists/{id}/Items (the same song twice).
+        let entries: [Track] = try Jellyfin.decode(Data(#"{"Items":[{"Name":"x","Id":"1","PlaylistItemId":"e1"},{"Name":"x","Id":"1","PlaylistItemId":"e2"}]}"#.utf8))
+        assert(entries.map(\.playlistItemId) == ["e1", "e2"] && bare[0].playlistItemId == nil, "playlist entries keep their own ids")
+        assert(unique(entries + bare).map(\.id) == ["1"] && unique([]).isEmpty, "a song picked twice goes in once")
+        let lists: [Playlist] = try Jellyfin.decode(Data(#"{"Items":[{"Name":"Drive","Id":"p1","ChildCount":2,"ImageTags":{"Primary":"c"}},{"Name":"New","Id":"p2","ImageTags":{}}]}"#.utf8))
+        assert(lists[0].childCount == 2 && lists[0].imageTags?["Primary"] == "c" && lists[1].childCount == nil)
+        assert(songCount(1) == "1 song" && songCount(0) == "0 songs")
         print("transport ok")
     }
 }
