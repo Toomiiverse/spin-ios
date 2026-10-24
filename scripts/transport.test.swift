@@ -83,6 +83,9 @@ import Foundation
         let lists: [Playlist] = try Jellyfin.decode(Data(#"{"Items":[{"Name":"Drive","Id":"p1","ChildCount":2,"ImageTags":{"Primary":"c"}},{"Name":"New","Id":"p2","ImageTags":{}}]}"#.utf8))
         assert(lists[0].childCount == 2 && lists[0].imageTags?["Primary"] == "c" && lists[1].childCount == nil)
         assert(songCount(1) == "1 song" && songCount(0) == "0 songs")
+        let kept = try JSONDecoder().decode([Track].self, from: JSONEncoder().encode(library))
+        assert(kept == library && kept[0].artTag == "t9", "downloaded songs keep their details on the phone")
+        assert(jf.download(library[0])!.absoluteString == "https://h.example:8920/Items/s1/Download?api_key=tok")
         print("transport ok")
     }
 }

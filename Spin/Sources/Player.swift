@@ -101,7 +101,7 @@ import Combine
     }
 
     private func load() {
-        guard let track = current, let url = client?.stream(track) else { return }
+        guard let track = current, let url = Shared.downloads.file(track) ?? client?.stream(track) else { return }
         av.replaceCurrentItem(with: AVPlayerItem(url: url))
         resume()
         publishNowPlaying(track)

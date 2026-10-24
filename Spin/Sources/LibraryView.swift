@@ -5,6 +5,7 @@ import SwiftUI
 struct LibraryView: View {
     @EnvironmentObject private var session: Session
     @EnvironmentObject private var player: Player
+    @EnvironmentObject private var downloads: Downloads
     @State private var songs: [Track] = []
     @State private var filter = ""
     @State private var error: String?
@@ -58,6 +59,11 @@ struct LibraryView: View {
                         .contextMenu {
                             if !selecting {
                                 Button("Add to playlist", systemImage: "text.badge.plus") { adding = [track] }
+                                if downloads.has(track) {
+                                    Button("Remove from phone", systemImage: "iphone.slash") { downloads.remove(track) }
+                                } else {
+                                    Button("Download to phone", systemImage: "arrow.down.circle") { save([track]) }
+                                }
                                 Button("Select", systemImage: "checkmark.circle") { selecting = true; selected = [track.id] }
                                 Button("Edit details and cover", systemImage: "pencil") { editing = track }
                                 Button("Delete from library", systemImage: "trash", role: .destructive) { deleting = [track] }
@@ -153,6 +159,11 @@ struct LibraryView: View {
                 Label("Playlist", systemImage: "text.badge.plus").caps(14).padding(.horizontal, 14).padding(.vertical, 10)
                     .background(Ink.pink, in: Slant()).foregroundStyle(.black)
             }
+            Button { save(picked); selecting = false; selected = [] } label: {
+                Image(systemName: "arrow.down.circle").font(.headline).foregroundStyle(.white).frame(width: 44, height: 40)
+                    .background(Ink.panel, in: Slant())
+            }
+            .accessibilityLabel("Download selected to phone")
             Button { deleting = picked } label: {
                 Image(systemName: "trash").font(.headline).foregroundStyle(.white).frame(width: 44, height: 40)
                     .background(Ink.panel, in: Slant())
@@ -205,19 +216,28 @@ struct LibraryView: View {
         }
     }
 
+    private func save(_ tracks: [Track]) {
+        guard let client = session.client else { return }
+        Task {
+            do { try await downloads.save(tracks, via: client) } catch { self.error = "Download failed: \(error.localizedDescription)" }
+        }
+    }
+
     private func load() async {
         guard let client = session.client else { return }
         do {
             songs = try await client.songs()
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            // No connection: what is on the phone still plays.
+            if songs.isEmpty && !downloads.saved.isEmpty { songs = downloads.saved } else { self.error = error.localizedDescription }
         }
     }
 }
 
 struct SongRow: View {
     @EnvironmentObject private var session: Session
+    @EnvironmentObject private var downloads: Downloads
     let track: Track
     let current: Bool
 
@@ -229,6 +249,11 @@ struct SongRow: View {
                 Text(track.artist).font(.footnote.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
+            if downloads.busy.contains(track.id) {
+                ProgressView().tint(Ink.pink).accessibilityLabel("Downloading")
+            } else if downloads.has(track) {
+                Image(systemName: "arrow.down.circle.fill").foregroundStyle(Ink.neonGreen).accessibilityLabel("On this phone")
+            }
             Text(clock(track.seconds)).font(.system(size: 12, weight: .semibold, design: .monospaced)).foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)

@@ -4,12 +4,14 @@ import SwiftUI
 @MainActor enum Shared {
     static let session = Session()
     static let player = Player()
+    static let downloads = Downloads()
 }
 
 @main
 struct SpinApp: App {
     @StateObject private var session = Shared.session
     @StateObject private var player = Shared.player
+    @StateObject private var downloads = Shared.downloads
 
     var body: some Scene {
         WindowGroup {
@@ -18,6 +20,7 @@ struct SpinApp: App {
             }
             .environmentObject(session)
             .environmentObject(player)
+            .environmentObject(downloads)
             .preferredColorScheme(.dark)
         }
     }

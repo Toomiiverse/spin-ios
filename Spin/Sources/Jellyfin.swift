@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 
-struct Track: Identifiable, Decodable, Hashable {
+struct Track: Identifiable, Codable, Hashable {
     let id: String
     let name: String
     let album: String?
@@ -131,6 +131,9 @@ struct Jellyfin {
             + "&container=mp3,aac,m4a%7Caac,m4b%7Caac,flac,alac,m4a%7Calac,wav,aiff"
             + "&transcodingContainer=ts&transcodingProtocol=hls&audioCodec=aac&maxStreamingBitrate=100000000")
     }
+
+    /// The original file, as stored on the server.
+    func download(_ track: Track) -> URL? { URL(string: "\(server)/Items/\(track.id)/Download?api_key=\(token)") }
 
     static func authorization(token: String?) -> String {
         var header = "MediaBrowser Client=\"Spin\", Device=\"iPhone\", DeviceId=\"\(deviceId)\", Version=\"1.0\""
