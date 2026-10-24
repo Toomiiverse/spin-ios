@@ -40,8 +40,8 @@ targets:
           - audio
     settings:
       base:
-        # If App Store Connect registers a different identifier (Haru's got a Team ID suffix), put that here.
-        PRODUCT_BUNDLE_IDENTIFIER: com.toomiiverse.spin
+        # Apple registered the App ID with the Team ID as a suffix (2026-10-24), as it did for Haru.
+        PRODUCT_BUNDLE_IDENTIFIER: com.toomiiverse.spin.JF3928RYMD
         PRODUCT_NAME: Spin
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: "$(DEVELOPMENT_TEAM)"
