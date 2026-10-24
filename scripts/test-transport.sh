@@ -4,5 +4,5 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 test_dir=$(mktemp -d)
 trap 'rm -rf "$test_dir"' EXIT
-swiftc -parse-as-library -o "$test_dir/transport" Spin/Sources/Transport.swift Spin/Sources/Jellyfin.swift Spin/Sources/Yubal.swift scripts/transport.test.swift
+swiftc -parse-as-library -o "$test_dir/transport" Spin/Sources/Transport.swift Spin/Sources/Jellyfin.swift Spin/Sources/Yubal.swift Spin/Sources/Downloads.swift scripts/transport.test.swift
 "$test_dir/transport"

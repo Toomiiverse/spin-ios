@@ -122,7 +122,7 @@ struct Jellyfin {
         URL(string: "\(server)/Items/\(itemId)/Images/Primary?fillWidth=\(size)&fillHeight=\(size)&quality=90" + (tag.map { "&tag=\($0)" } ?? ""))
     }
 
-    func artwork(for track: Track, size: Int = 600) -> URL? { artwork(track.artId, size: size, tag: track.artTag) }
+    func artwork(for track: Track, size: Int = 600) -> URL? { Downloads.cover(track) ?? artwork(track.artId, size: size, tag: track.artTag) }
 
     /// Direct play when the phone can decode the file, else Jellyfin transcodes to AAC over HLS.
     /// The token travels in the query because AVPlayer sends no headers of ours.
