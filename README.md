@@ -23,9 +23,11 @@ CD-deck player (black deck, hot pink disc, vertical LCD, hazard stripes). iPhone
 
 ## Building (same pipeline as haru-ios)
 
-1. Workflow: put `scripts/ios.yml.wanted` at `.github/workflows/ios.yml` (needs a token with the `workflow` scope,
-   or paste it on github.com).
-2. App Store Connect → My Apps → **+ New App**, bundle ID `com.toomiiverse.spin` (if Apple registers a different
+The workflow `.github/workflows/ios.yml` builds every push to `main` on GitHub's xcode-27 runner: the transport
+test, then xcodegen, then xcodebuild. Unsigned until the App Store Connect secrets exist (an `.ipa` artifact);
+signed and uploaded to TestFlight once they do.
+
+1. App Store Connect → My Apps → **+ New App**, bundle ID `com.toomiiverse.spin` (if Apple registers a different
    identifier, change `PRODUCT_BUNDLE_IDENTIFIER` in `project.yml`).
-3. Secrets: `scripts/arm-testflight.sh <AuthKey.p8> <key id> <issuer id> <team id>` sets the four repository secrets.
-4. Push to `main`: the runner tests, builds, signs with the ASC key and uploads to TestFlight.
+2. `scripts/arm-testflight.sh <AuthKey.p8> <key id> <issuer id> <team id>` sets the four repository secrets and
+   starts a signed build.

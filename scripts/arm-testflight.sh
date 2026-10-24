@@ -26,7 +26,7 @@ echo "Secrets set on $repo:"; gh secret list --repo "$repo"
 # token cannot push .github/workflows, so check rather than assume.
 if gh api "repos/$repo/contents/.github/workflows/ios.yml" --jq .content | base64 -d | grep -q ASC_KEY_P8; then
   echo "Workflow passes the secrets. Starting a build."
-  gh workflow run ios.yml --repo "$repo"
+  gh workflow run ios.yml --repo "$repo" -f upload_to_testflight=true
   sleep 5; gh run list --repo "$repo" --limit 1
 else
   cat >&2 <<MSG
