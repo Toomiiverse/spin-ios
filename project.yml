@@ -35,6 +35,14 @@ targets:
         UIRequiresFullScreen: true
         UIUserInterfaceStyle: Dark
         ITSAppUsesNonExemptEncryption: false
+        # The car screen (CarPlay.swift). The phone's window comes from SwiftUI's WindowGroup as before.
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+          UISceneConfigurations:
+            CPTemplateApplicationSceneSessionRoleApplication:
+              - UISceneClassName: CPTemplateApplicationScene
+                UISceneConfigurationName: SpinCarPlay
+                UISceneDelegateClassName: "$(PRODUCT_MODULE_NAME).SpinCarPlayScene"
         # Keeps playing with the screen off; the lock screen shows the track (Player.swift).
         UIBackgroundModes:
           - audio

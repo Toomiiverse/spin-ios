@@ -9,6 +9,7 @@ import Combine
     @Published private(set) var transport = Transport(count: 0)
     /// Follows the AVPlayer itself, so a phone call pausing playback shows as paused here too.
     @Published private(set) var playing = false
+    @Published private(set) var shuffle = false
 
     var current: Track? { queue.indices.contains(transport.index) ? queue[transport.index] : nil }
     var duration: Double { current?.seconds ?? 0 }
@@ -18,6 +19,8 @@ import Combine
     private var client: Jellyfin?
     private var observers: [Any] = []
     private var bag = Set<AnyCancellable>()
+    /// The queue as it was picked, so shuffle off puts it back.
+    private var picked: [Track] = []
 
     init() {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
@@ -37,10 +40,36 @@ import Combine
         remoteCommands()
     }
 
-    func play(_ tracks: [Track], at index: Int, via client: Jellyfin) {
+    /// Plays `tracks` from `index`; with shuffle on, that song first and the rest mixed.
+    func play(_ tracks: [Track], at index: Int, via client: Jellyfin, shuffled: Bool? = nil) {
         self.client = client
-        queue = tracks
-        transport = Transport(count: tracks.count, index: index)
+        if let shuffled { shuffle = shuffled }
+        picked = tracks
+        queue = shuffle ? shuffledKeeping(tracks, first: index) : tracks
+        transport = Transport(count: tracks.count, index: shuffle ? 0 : index, repeatMode: transport.repeatMode)
+        load()
+        publishModes()
+    }
+
+    func toggleShuffle() {
+        shuffle.toggle()
+        if let playing = current {
+            queue = shuffle ? shuffledKeeping(picked, first: picked.firstIndex(of: playing) ?? 0) : picked
+            transport.index = queue.firstIndex(of: playing) ?? 0
+        }
+        publishModes()
+    }
+
+    func cycleRepeat() {
+        transport.cycleRepeat()
+        publishModes()
+    }
+
+    /// Jump to a song already in the queue (CarPlay's Up Next).
+    func jump(to index: Int) {
+        guard queue.indices.contains(index) else { return }
+        transport.index = index
+        transport.time = 0
         load()
     }
 
@@ -94,6 +123,8 @@ import Combine
             MPMediaItemPropertyPlaybackDuration: track.seconds,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: 0.0,
             MPNowPlayingInfoPropertyPlaybackRate: 1.0,
+            MPNowPlayingInfoPropertyPlaybackQueueIndex: transport.index,
+            MPNowPlayingInfoPropertyPlaybackQueueCount: queue.count,
         ]
         guard let url = client?.artwork(track.artId) else { return }
         Task {
@@ -112,8 +143,34 @@ import Combine
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
+    /// The shuffle and repeat state CarPlay's Now Playing buttons and the lock screen show.
+    private func publishModes() {
+        let center = MPRemoteCommandCenter.shared()
+        center.changeShuffleModeCommand.currentShuffleType = shuffle ? .items : .off
+        switch transport.repeatMode {
+        case .off: center.changeRepeatModeCommand.currentRepeatType = .off
+        case .all: center.changeRepeatModeCommand.currentRepeatType = .all
+        case .one: center.changeRepeatModeCommand.currentRepeatType = .one
+        }
+    }
+
     private func remoteCommands() {
         let center = MPRemoteCommandCenter.shared()
+        center.changeShuffleModeCommand.addTarget { [weak self] event in
+            guard let type = (event as? MPChangeShuffleModeCommandEvent)?.shuffleType else { return .commandFailed }
+            Task { @MainActor in if let self, (type != .off) != self.shuffle { self.toggleShuffle() } }
+            return .success
+        }
+        center.changeRepeatModeCommand.addTarget { [weak self] event in
+            guard let type = (event as? MPChangeRepeatModeCommandEvent)?.repeatType else { return .commandFailed }
+            Task { @MainActor in
+                guard let self else { return }
+                let wanted: Transport.Repeat = type == .one ? .one : type == .all ? .all : .off
+                while self.transport.repeatMode != wanted { self.transport.cycleRepeat() }
+                self.publishModes()
+            }
+            return .success
+        }
         center.playCommand.addTarget { [weak self] _ in Task { @MainActor in self?.resume() }; return .success }
         center.pauseCommand.addTarget { [weak self] _ in Task { @MainActor in self?.pause() }; return .success }
         center.togglePlayPauseCommand.addTarget { [weak self] _ in Task { @MainActor in self?.toggle() }; return .success }

@@ -53,6 +53,19 @@ import Foundation
         assert(Sources.isSoundCloud("https://soundcloud.com/a/b") && Sources.isSoundCloud("https://on.soundcloud.com/x"))
         assert(!Sources.isSoundCloud("http://soundcloud.com/a") && !Sources.isSoundCloud("https://soundcloud.com.evil.net/a") && !Sources.isSoundCloud("https://music.youtube.com/x"))
         assert(Sources.defaultServer == "https://haruserver.tail6da04d.ts.net:8930/sources")
+
+        var looping = Transport(count: 2, index: 1)
+        looping.cycleRepeat()
+        assert(looping.repeatMode == .all && looping.ended() && looping.index == 0, "repeat all wraps after the last track")
+        looping.cycleRepeat()
+        looping.time = 50
+        assert(looping.repeatMode == .one && looping.ended() && looping.index == 0 && looping.time == 0, "repeat one replays")
+        looping.cycleRepeat()
+        assert(looping.repeatMode == .off)
+        let mixed = shuffledKeeping(Array(0..<50), first: 7)
+        assert(mixed.first == 7 && mixed.sorted() == Array(0..<50), "shuffle keeps every song and the playing one first")
+        assert(shuffledKeeping([Int](), first: 0).isEmpty && shuffledKeeping([1], first: 5) == [1])
+        assert(letter("derezzed") == "D" && letter("Été") == "E" && letter("2 Fast") == "#" && letter("") == "#" && letter("春") == "#")
         print("transport ok")
     }
 }

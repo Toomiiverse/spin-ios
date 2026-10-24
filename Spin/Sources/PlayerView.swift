@@ -95,14 +95,16 @@ struct PlayerView: View {
                            if !editing, let target = scrubbing { player.seek(to: target); scrubbing = nil }
                        })
                 .tint(Ink.pink)
-                HStack {
+                HStack(spacing: 0) {
+                    mode("shuffle", on: player.shuffle, label: "Shuffle") { player.toggleShuffle() }
+                    Spacer()
                     control("backward.end.fill") { player.previous() }
-                    Spacer()
                     control(player.playing ? "pause.fill" : "play.fill", size: 36) { player.toggle() }
-                    Spacer()
                     control("forward.end.fill") { player.next() }
+                    Spacer()
+                    mode(player.transport.repeatMode == .one ? "repeat.1" : "repeat", on: player.transport.repeatMode != .off,
+                         label: "Repeat") { player.cycleRepeat() }
                 }
-                .padding(.horizontal, 24)
             }
             .padding(16)
             .background(Color(red: 0.055, green: 0.055, blue: 0.07), in: RoundedRectangle(cornerRadius: 12))
@@ -130,6 +132,20 @@ struct PlayerView: View {
             .background(Ink.pink)
         }
         .clipShape(Slant(skew: 10))
+    }
+
+    /// Shuffle and repeat: pink with a dot under it when on, like Spotify's green.
+    private func mode(_ symbol: String, on: Bool, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: symbol).font(.system(size: 17, weight: .bold))
+                Circle().frame(width: 4, height: 4).opacity(on ? 1 : 0)
+            }
+            .foregroundStyle(on ? Ink.pink : Color.white.opacity(0.6))
+            .frame(width: 44, height: 50)
+        }
+        .accessibilityLabel(label)
+        .accessibilityValue(on ? "On" : "Off")
     }
 
     private func control(_ symbol: String, size: CGFloat = 22, action: @escaping () -> Void) -> some View {
