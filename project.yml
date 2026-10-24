@@ -52,6 +52,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.toomiiverse.spin.JF3928RYMD
         PRODUCT_NAME: Spin
         CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: Spin/Spin.entitlements
         DEVELOPMENT_TEAM: "$(DEVELOPMENT_TEAM)"
         GENERATE_INFOPLIST_FILE: "NO"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
