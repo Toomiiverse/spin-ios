@@ -135,6 +135,15 @@ struct Sources {
 
     func clearSoundCloud() async throws { _ = try await send("DELETE", "/soundcloud") }
 
+    /// Songs to explore, from this library's own plays and favourites (the server keeps the list six hours; `fresh`
+    /// makes a new one), and the songs it started from.
+    func discover(via client: Jellyfin, fresh: Bool = false) async throws -> (results: [Result], seeds: [String]) {
+        struct Page: Decodable { let results: [Result]; let seeds: [String] }
+        let data = try await send("GET", fresh ? "/discover?fresh=1" : "/discover", client: client)
+        let page = try JSONDecoder().decode(Page.self, from: data)
+        return (page.results, page.seeds)
+    }
+
     // Library changes act on the files themselves; the server checks the Jellyfin sign-in is an administrator's.
 
     func refreshLibrary(_ client: Jellyfin) async throws { _ = try await send("POST", "/library/refresh", client: client) }

@@ -11,6 +11,7 @@ struct LibraryView: View {
     @State private var error: String?
     @State private var showPlayer = false
     @State private var showAdd = false
+    @State private var showDiscover = false
     @State private var showPlaylists = false
     @State private var editing: Track?
     @State private var deleting: [Track] = []
@@ -102,6 +103,10 @@ struct LibraryView: View {
                         Button("Select") { selecting = true }.caps(12).disabled(songs.isEmpty)
                     }
                     ToolbarItem(placement: .topBarTrailing) {
+                        Button { showDiscover = true } label: { Image(systemName: "sparkles").font(.headline) }
+                            .accessibilityLabel("Discover")
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
                         Button { showAdd = true } label: { Image(systemName: "plus").font(.headline) }
                             .accessibilityLabel("Add music")
                     }
@@ -111,6 +116,9 @@ struct LibraryView: View {
                 if selecting { selectionBar }
             }
             // New downloads reach Jellyfin a minute or so after they finish; reload on the way back and on pull.
+            .sheet(isPresented: $showDiscover, onDismiss: { Task { await load() } }) {
+                DiscoverView().environmentObject(session)
+            }
             .sheet(isPresented: $showAdd, onDismiss: { Task { await load() } }) {
                 AddView(library: songs) { await load() }.environmentObject(session)
             }

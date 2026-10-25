@@ -3,6 +3,7 @@
 GET  /search?q=...&source=youtube|soundcloud  ytmusicapi / SoundCloud search, results carry a link to add
 POST /soundcloud {"url": ...}                 queue a SoundCloud track or playlist for scdl
 GET  /soundcloud                              the queue, in yubal's job shape so the app shows both alike
+GET  /discover[?fresh=1]                       songs to explore, from the signed-in user's own library and plays
 DELETE /soundcloud                            clear finished downloads from the queue
 
 Library changes, for a signed-in Jellyfin admin (the app's own Jellyfin token in the Authorization header):
@@ -38,6 +39,26 @@ def is_soundcloud(url):
         return False
     host = (u.hostname or "").lower()
     return u.scheme == "https" and (host == "soundcloud.com" or host.endswith(".soundcloud.com"))
+
+def full_link(url):
+    """SoundCloud's app share links (https://on.soundcloud.com/...) only redirect to the track's own page, and that
+    page is all scdl and the API know ("No suitable extractor found"), so a share link is followed first and the page
+    kept without the redirect's tracking query. Any other link passes through as it is."""
+    url = url.strip()
+    if (urlparse(url).hostname or "").lower() != "on.soundcloud.com":
+        return url
+    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        final = urlparse(r.geturl())
+    full = f"https://{final.hostname}{final.path}"
+    if (final.hostname or "").lower() == "on.soundcloud.com" or not is_soundcloud(full):
+        raise ValueError(f"it leads to {full}, not a SoundCloud page")
+    return full
+
+# SoundCloud now and then times out or turns a request away for a moment (HTTP 408, 429, 5xx); scdl then saves
+# nothing. Such a download is tried RETRIES more times, RETRY_S seconds apart and more each time.
+TRANSIENT = re.compile(r"\b(408|429|5\d\d)\b|timed? ?out", re.I)
+RETRIES, RETRY_S = 2, 8
 
 # --- search -----------------------------------------------------------------
 
@@ -112,10 +133,16 @@ def worker():
         job.update(status="downloading", progress=10.0, started_at=time.time())
         tmp = tempfile.mkdtemp(prefix="spin-scdl-")
         try:
-            # A list, never a shell: the URL was checked to be https://*soundcloud.com.
-            run = subprocess.run([SCDL, "-l", job["url"], "--path", tmp, "--no-original", "--hide-progress", "-c",
-                                  "--playlist-name-format", "{playlist[tracknumber]:02d} - {title}"],
-                                 capture_output=True, text=True, timeout=1800)
+            for attempt in range(1 + RETRIES):
+                # A list, never a shell: the URL was checked to be https://*soundcloud.com.
+                run = subprocess.run([SCDL, "-l", job["url"], "--path", tmp, "--no-original", "--hide-progress", "-c",
+                                      "--playlist-name-format", "{playlist[tracknumber]:02d} - {title}"],
+                                     capture_output=True, text=True, timeout=1800)
+                saved = any(f.lower().endswith(AUDIO) for _, _, files in os.walk(tmp) for f in files)
+                if saved or attempt == RETRIES or not TRANSIENT.search((run.stderr or "") + (run.stdout or "")):
+                    break
+                print(f"[spin-sources] {job['url']}: SoundCloud did not answer, trying again", flush=True)
+                time.sleep(RETRY_S * (attempt + 1))
             subdirs = [d for d in os.listdir(tmp) if os.path.isdir(os.path.join(tmp, d))]
             job.update(status="importing", progress=90.0)
             # scdl makes one subfolder for a playlist, named after it; that name becomes the album.
@@ -161,6 +188,111 @@ def queue_soundcloud(url, force=False):
                 jobs.pop(old["id"], None)
     work.put(job)
     return job
+
+# --- discover -------------------------------------------------------------------
+# Songs to explore, from what the user already listens to. Their most-loved songs are the seeds: SEEDS of them, by
+# plays (PLAY), favourites (FAVOURITE) and how recently they were added (RECENT within RECENT_DAYS), one per artist
+# while there are enough artists. Each seed's YouTube Music radio (its "similar songs" mix) votes for its tracks, a
+# vote worth the seed's weight and less the further down the mix the track sits; songs heard from several seeds rise.
+# Anything already in the library (by title without brackets, and artist) is left out. The list, in search's result
+# shape with the reason as its detail, is kept CACHE_S per user, so the screen opens at once; ?fresh=1 makes a new one.
+
+SEEDS, MIX, PICKS = 6, 25, 30
+PLAY, FAVOURITE, RECENT, RECENT_DAYS = 3, 5, 2, 30
+CACHE_S = 6 * 3600
+_discovered = {}  # user id -> (made at, result)
+
+def bare(text):
+    """A title or name compared loosely: no bracketed parts, no "feat.", lower case, letters and digits only."""
+    text = re.sub(r"[([].*?[)\]]", " ", text or "")
+    text = re.sub(r"\b(feat|ft)\.?\s.*$", " ", text, flags=re.I)
+    return re.sub(r"[^\w]+", " ", text.lower()).strip()
+
+def seed_weight(song, now):
+    data = song.get("UserData") or {}
+    added = song.get("DateCreated") or ""
+    recent = 0
+    try:
+        days = (now - time.mktime(time.strptime(added[:19], "%Y-%m-%dT%H:%M:%S"))) / 86400
+        recent = RECENT if days <= RECENT_DAYS else 0
+    except ValueError:
+        pass
+    return 1 + PLAY * (data.get("PlayCount") or 0) + (FAVOURITE if data.get("IsFavorite") else 0) + recent
+
+def pick_seeds(songs, now):
+    ranked = sorted(songs, key=lambda s: -seed_weight(s, now))
+    seeds, artists = [], set()
+    for song in ranked:  # one per artist first
+        artist = bare(", ".join(song.get("Artists") or []))
+        if artist not in artists:
+            seeds.append(song); artists.add(artist)
+        if len(seeds) == SEEDS:
+            return seeds
+    return (seeds + [s for s in ranked if s not in seeds])[:SEEDS]
+
+def in_library(title, artist, library):
+    t, a = bare(title), bare(artist)
+    return any(t == lt and (not a or not la or a in la or la in a) for lt, la in library)
+
+# Not music to explore: producers' beats for sale ("(FREE FOR PROFIT) ... Type Beat") and karaoke takes.
+FILLER = re.compile(r"type beat|for profit|karaoke", re.I)
+
+def rank(votes, library, seeds):
+    """The picks from the votes (videoId -> {track, score, reason}), best first, the library and seeds left out."""
+    out = []
+    for v in sorted(votes.values(), key=lambda v: -v["score"]):
+        t = v["track"]
+        artist = ", ".join(a["name"] for a in t.get("artists") or [])
+        if FILLER.search(t.get("title") or "") or in_library(t.get("title"), artist, library) or in_library(t.get("title"), artist, seeds):
+            continue
+        out.append({"kind": "song", "title": t.get("title") or "", "artist": artist, "detail": v["reason"],
+                    "duration": t.get("length") or "", "thumbnail": (t.get("thumbnail") or [{}])[-1].get("url"),
+                    "url": f"https://music.youtube.com/watch?v={t['videoId']}"})
+        if len(out) == PICKS:
+            break
+    return out
+
+def discover(auth, fresh=False):
+    if not auth or "Token=" not in auth:
+        raise Refused(401, "Sign in first.")
+    me = jellyfin("GET", "/Users/Me", auth)
+    cached = _discovered.get(me["Id"])
+    if cached and not fresh and time.time() - cached[0] < CACHE_S:
+        return cached[1]
+    songs = (jellyfin("GET", f"/Users/{me['Id']}/Items?IncludeItemTypes=Audio&Recursive=true&Fields=DateCreated&EnableUserData=true", auth) or {}).get("Items") or []
+    if not songs:
+        return {"results": [], "seeds": []}
+    global _yt
+    from ytmusicapi import YTMusic
+    _yt = _yt or YTMusic()
+    now = time.time()
+    seeds = pick_seeds(songs, now)
+    votes = {}
+    for seed in seeds:
+        title, artist = seed.get("Name") or "", ", ".join(seed.get("Artists") or [])
+        try:
+            found = [r for r in _yt.search(f"{bare(title)} {artist}", filter="songs", limit=3) if r.get("videoId")]
+            if not found:
+                continue
+            mix = _yt.get_watch_playlist(videoId=found[0]["videoId"], limit=MIX, radio=True).get("tracks") or []
+        except Exception as e:  # one seed's mix failing leaves the others
+            print(f"[spin-sources] discover: no mix for {title}: {e}", flush=True)
+            continue
+        weight = seed_weight(seed, now)
+        short = re.sub(r"\s*[([].*?[)\]]", "", title).strip() or title  # "Watson", not "Watson (feat. Oslo Green)"
+        for place, track in enumerate(mix[1:MIX + 1]):  # the first is the seed itself
+            if not track.get("videoId"):
+                continue
+            vote = votes.setdefault(track["videoId"], {"track": track, "score": 0.0, "best": 0.0, "reason": ""})
+            worth = weight * (1 - place / (MIX + 5))
+            vote["score"] += worth
+            if worth > vote["best"]:
+                vote.update(best=worth, reason=f"Because you like {short}")
+    library = [(bare(s.get("Name")), bare(", ".join(s.get("Artists") or []))) for s in songs]
+    seen = [(bare(s.get("Name")), bare(", ".join(s.get("Artists") or []))) for s in seeds]
+    result = {"results": rank(votes, library, seen), "seeds": [s.get("Name") for s in seeds]}
+    _discovered[me["Id"]] = (time.time(), result)
+    return result
 
 # --- library changes -----------------------------------------------------------
 
@@ -317,6 +449,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"results": soundcloud(q) if source == "soundcloud" else youtube(q)})
             except Exception as e:
                 return self._send(502, {"detail": f"Search failed: {e}"[:300]})
+        if path == "/discover":
+            try:
+                fresh = (parse_qs(urlparse(self.path).query).get("fresh") or [""])[0] == "1"
+                return self._send(200, discover(self.headers.get("Authorization"), fresh))
+            except Refused as e:
+                return self._send(e.code, {"detail": e.detail})
         if path == "/soundcloud":
             with lock:
                 return self._send(200, {"jobs": sorted(jobs.values(), key=lambda j: j["created_at"])})
@@ -392,6 +530,10 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(url, str) or not is_soundcloud(url):
             return self._send(422, {"detail": "That is not a SoundCloud link."})
         try:
+            url = full_link(url)
+        except (OSError, ValueError) as e:  # URLError is an OSError
+            return self._send(422, {"detail": f"Could not open that SoundCloud link: {e}"})
+        try:
             self._send(201, {"id": queue_soundcloud(url, force)["id"]})
         except Duplicate as e:
             self._send(409, {"detail": str(e), "duplicate": True})
@@ -404,6 +546,20 @@ def selftest():
     assert is_soundcloud("https://soundcloud.com/a/b") and is_soundcloud("https://on.soundcloud.com/x")
     assert not is_soundcloud("http://soundcloud.com/a") and not is_soundcloud("https://evilsoundcloud.com/a")
     assert not is_soundcloud("--exec=rm") and not is_soundcloud("https://soundcloud.com.evil.net/a")
+    assert full_link(" https://soundcloud.com/a/b ") == "https://soundcloud.com/a/b"  # not a share link: untouched
+    # Discover: loose titles, seeds one per artist, and the library and seeds kept out of the picks.
+    assert bare("Watson (feat. Oslo Green)") == "watson" and bare("In Love [ EXTENDED ] ft. X") == "in love"
+    lib = [{"Name": "A", "Artists": ["X"], "UserData": {"PlayCount": 9}}, {"Name": "B", "Artists": ["X"], "UserData": {"PlayCount": 5}},
+           {"Name": "C", "Artists": ["Y"], "UserData": {}}]
+    assert [x["Name"] for x in pick_seeds(lib, time.time())][:2] == ["A", "C"]  # X once, then Y, before X again
+    track = lambda vid, title, artist: {"videoId": vid, "title": title, "artists": [{"name": artist}], "thumbnail": [{"url": "u"}]}
+    votes = {"1": {"track": track("1", "B (Official)", "X"), "score": 9, "reason": "r"}, "2": {"track": track("2", "New", "Z"), "score": 3, "reason": "r"},
+             "3": {"track": track("3", "Newer", "Z"), "score": 5, "reason": "r"}}
+    picked = rank(votes, [("b", "x")], [])
+    assert [p["title"] for p in picked] == ["Newer", "New"] and picked[0]["url"].endswith("v=3")
+    assert FILLER.search("(FREE FOR PROFIT) Chill Type Beat") and not FILLER.search("Tarantino")
+    assert TRANSIENT.search("ERROR: [soundcloud] x: Unable to download JSON metadata: HTTP Error 408: Request Time-out")
+    assert TRANSIENT.search("Read timed out.") and not TRANSIENT.search("ERROR: No suitable extractor found for URL")
     assert image_kind(b"\xff\xd8\xff\xe0rest") == "jpeg" and image_kind(b"\x89PNG\r\n\x1a\nrest") == "png"
     try:
         image_kind(b"GIF89a")
