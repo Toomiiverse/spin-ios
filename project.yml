@@ -46,6 +46,11 @@ targets:
         # Keeps playing with the screen off; the lock screen shows the track (Player.swift).
         UIBackgroundModes:
           - audio
+    # Apple granted CarPlay Audio (2026-10-26); without this the car screen never lists Spin.
+    entitlements:
+      path: Spin/Spin.entitlements
+      properties:
+        com.apple.developer.carplay-audio: true
     settings:
       base:
         # Apple registered the App ID with the Team ID as a suffix (2026-10-24), as it did for Haru.
